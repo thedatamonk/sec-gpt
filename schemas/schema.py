@@ -1,7 +1,6 @@
 from pydantic import BaseModel, model_validator, Field
-from typing import Optional, Dict, Any
-
-
+from typing import Optional, Dict, Any, List, Literal
+from enum import Enum
 
 class CheckScopeSchema(BaseModel):
     is_related: bool
@@ -16,26 +15,40 @@ class CheckScopeSchema(BaseModel):
               raise ValueError("'reason' cannot be empty when 'is_related' is False.")
           
           return self
-    
 
 class Company(BaseModel):
     """A model for a single company with a name and/or a ticker."""
-    name: Optional[str] = None
-    ticker: Optional[str] = None
+    type: Literal["name", "cik", "ticker"]
+    value: str
 
-    @model_validator(mode='after')
-    def check_at_least_one_field_provided(self) -> 'Company':
-        """Ensures that at least a name or a ticker is given."""
-        if not self.name and not self.ticker:
-            raise ValueError("A Company object must have at least a 'name' or a 'ticker'.")
-        return self
+
+class FinancialMetrics(str, Enum):
+    REVENUE = 'revenue'
+    NET_INCOME = 'net_income'
+    CASH_FLOW_FROM_OPERATING_ACTIVITIES = 'cash_flow_from_operating_activities'
+    OPERATING_EXPENSES = 'operating_expenses'
+    GROSS_PROFIT = 'gross_profit'
+    COST_OF_GOODS_SOLD = 'cost_of_goods_sold'
+    TOTAL_ASSETS = 'total_assets'
+    TOTAL_LIABILITIES = 'total_liabilities'
+    TOTAL_EQUITY = 'total_equity'
+    EARNINGS_PER_SHARE = 'earnings_per_share'
+
 
 class FinancialEntitiesSchema(BaseModel):
     """The main model for extracting financial entities from a query."""
-    companies: list[Company]
-    metrics: list[str]
-    period: str
-
+    companies: List[Company] = Field(
+        default_factory=list,
+        description="A list of companies mentioned in the query, identified by name, CIK, or ticker."
+    )
+    financial_metrics: List[FinancialMetrics] = Field(
+        default_factory=list,
+        description="A list of financial metrics requested in the query, e.g., 'revenue' or 'net_income'."
+    )
+    time_period: List[str] = Field(
+        default_factory=list,
+        description="A list of time periods mentioned in the query, e.g., 'Q3 2023' or '2024'."
+    )
 
 
 class FeasibilityCheckSchema(BaseModel):
