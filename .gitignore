@@ -203,7 +203,6 @@ __marimo__/
 .streamlit/secrets.toml
 
 sec-docs
-experiments
 TODO.md
 .vscode
 cache/
