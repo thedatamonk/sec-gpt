@@ -1,11 +1,9 @@
-from typing import Any, Dict, List, Literal
-
-import ollama
 import openlit
+import ollama
+from typing import Dict, Any, Literal, List
 from pydantic.json_schema import JsonSchemaValue
-
-from constants import DEFAULT_OLLAMA_MODEL, OTLP_ENDPOINT
 from schemas.schema import CheckScopeSchema
+from constants import OTLP_ENDPOINT, DEFAULT_OLLAMA_MODEL
 
 openlit.init(
     otlp_endpoint=OTLP_ENDPOINT
@@ -62,7 +60,5 @@ User Query: "{query}"
 """
     response = llm_call(messages = [{"role": "user", "content": prompt_template}], stream=True, response_format=CheckScopeSchema.model_json_schema())
     response_obj = CheckScopeSchema.model_validate_json(response).model_dump()
-    
-
     
 
