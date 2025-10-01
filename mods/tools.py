@@ -232,3 +232,67 @@ class FinancialDataTool(BaseTool):
         if hasattr(financials, 'balance_sheet'):
             metrics.extend(dir(financials.balance_sheet))
         return [m for m in metrics if not m.startswith('_')]
+    
+
+class FilingSearchTool(BaseTool):
+    """Tool to search and retrieve specific SEC filings"""
+    
+    @property
+    def name(self) -> str:
+        return "filing_search"
+    
+    @property 
+    def description(self) -> str:
+        return "Search for SEC filings by company and form type"
+
+    def execute(self, cik_or_ticker: str, form_type: str = "10-K", 
+                limit: int = 5, year: Optional[int] = None) -> ToolResult:
+        """
+        Search for SEC filings
+        Args:
+            cik_or_ticker: Company ticker, or CIK
+            form_type: Type of filing (10-K, 10-Q, 8-K, etc.)
+            limit: Maximum number of filings to return
+            year: Specific year to filter by
+        """
+
+        try:
+            company = Company(cik_or_ticker.strip().upper())
+
+            # Get filings
+            kwargs: Dict[str, Any] = {"form": form_type}
+            if year:
+                kwargs["year"] = year
+                
+            filings = company.get_filings(**kwargs)[:limit]
+            
+            if not filings:
+                return ToolResult(
+                    success=False,
+                    error=f"No {form_type} filings found for {company.name}"
+                )
+            
+            # Format filing information
+            filing_data = []
+            for filing in filings:
+                filing_info = {
+                    "accession_number": filing.accession_number,
+                    "filing_date": filing.filing_date,
+                    "form": filing.form,
+                    "period_of_report": getattr(filing, 'period_of_report', None),
+                    "documents": len(filing.documents) if hasattr(filing, 'documents') else 0
+                }
+                filing_data.append(filing_info)
+            
+            return ToolResult(
+                success=True,
+                data=filing_data,
+                metadata={
+                    "company": company.name,
+                    "total_found": len(filing_data),
+                    "form_type": form_type
+                }
+            )
+        
+        except Exception as e:
+            return self._handle_error(e, f"Failed to search filings for {cik_or_ticker}")
