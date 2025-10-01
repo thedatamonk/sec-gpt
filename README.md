@@ -6,24 +6,12 @@ The SEC Agent
     - check whether the query is about a valid public company registered in the SEC database.
     - check whether the query is about a valid data duration. For instance, if the query is asking about MoM revenue of Apple for year 2029.
 
-***Current todolist-*** 
-1. ~~Multiple tickers are getting mapped to a single CIK. CIK is a unique identifier for a SEC-registered company. Need to modify the functionality so that companies with multiple tickers get mapped to a single entity.~~
-2. **Enhanced entity resolution**
-    - *ticker/company name/cik resolution* = when a user asks for a query extract these entities and match them to a standard entity in our database.
-    - *metric name resolution* = when a user asks for a query, extract the metric names that the user wants us to get info about.
-
-
 
 2. Planning Agent
 The planning agent is called after the query validator agent.
     - The planning agent "thinks" and breaks down the original query into smaller steps if required.
     - Each step needs to be executed with/without a tool.
     - The results are finally aggregated.
-
-***Current todolist-***
-1. How to break the original query into a sequence of atomic steps. My current thinking is that for this we will have to rely on the LLMs core text generation abilities.
-2. Once we have the sequence of steps, then we need to perform them (optionally by using the provided tools)
-
 
 
 **What kind of information is available in SEC filings - 10K (annual) and 10Q (quarterly)?**
