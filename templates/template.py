@@ -72,6 +72,45 @@ Context (Companies/Tickers/Time_Period/Financial Metrics extracted from the user
 ${enriched_data}
 """)
     
+
+    PLANNING_TEMPLATE = Template("""
+You are an expert SEC financial data analyst. Create a detailed step-by-step plan to answer the user's query.
+
+${context}
+
+${tools_info}
+
+Create a JSON plan with the following structure:
+{{
+  "plan": [
+    {{
+      "step": 1,
+      "description": "What this step does",
+      "action_type": "reasoning | tool_call | synthesis",
+      "tool": "tool_name or null",
+      "tool_parameters": {{"param": "value"}} or null,
+      "expected_output": "What you expect to get from this step",
+      "reasoning": "Why this step is needed"
+    }}
+  ]
+}}
+
+Action types:
+- "reasoning": Pure logical deduction (e.g., resolving "last year" to 2024)
+- "tool_call": Execute a tool to fetch data
+- "synthesis": Format final answer for user
+
+IMPORTANT GUIDELINES:
+1. Resolve vague time periods (e.g., "last year" -> 2024, "current" -> 2024)
+2. Map user terminology to correct metrics (e.g., "profit" -> "net_income")
+3. Use exact tool names and parameter names as defined above
+4. Ensure all required parameters are provided
+5. Keep the plan focused - only necessary steps
+6. The last step should usually be "synthesis" to format the answer
+
+Return ONLY the JSON, no other text.
+""")
+    
     @classmethod
     def get_template(cls, template_name: str) -> Template:
         """Get a specific template by name"""
