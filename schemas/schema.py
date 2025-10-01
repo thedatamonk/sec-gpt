@@ -1,6 +1,8 @@
-from pydantic import BaseModel, model_validator, Field
-from typing import Optional, Dict, Any, List, Literal
 from enum import Enum
+from typing import Any, Dict, List, Literal, Optional
+
+from pydantic import BaseModel, Field, model_validator
+
 
 class CheckScopeSchema(BaseModel):
     is_related: bool
@@ -72,5 +74,7 @@ class ReACTResponseSchema(BaseModel):
 
 if __name__ == "__main__":
      print (CheckScopeSchema.model_json_schema())
+     print (FinancialEntitiesSchema.model_json_schema())
+     print (FeasibilityCheckSchema.model_json_schema())
      print (FinancialEntitiesSchema.model_json_schema())
      print (FeasibilityCheckSchema.model_json_schema())

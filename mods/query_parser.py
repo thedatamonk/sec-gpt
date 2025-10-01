@@ -1,12 +1,14 @@
-from pydantic import BaseModel
-from typing import List
-from schemas.schema import FinancialMetrics, Company
-import re
-import requests
-from constants import SEC_COMPANY_TICKERS_URL, SEC_API_USER_AGENT
-from pathlib import Path
-from datetime import datetime, timedelta
 import json
+import re
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import List
+
+import requests
+from pydantic import BaseModel
+
+from constants import SEC_API_USER_AGENT, SEC_COMPANY_TICKERS_URL
+from schemas.schema import Company, FinancialMetrics
 
 
 class ParsedQuery(BaseModel):

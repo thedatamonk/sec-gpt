@@ -1,25 +1,18 @@
-import requests
 import json
-from typing import Dict, Any, List, Optional
-from schemas.schema import CheckScopeSchema, FinancialEntitiesSchema, FeasibilityCheckSchema
-from mods.utils import llm_call
-from templates.template import PromptTemplates
+from typing import Any, Dict, List, Optional
+
 from mods.query_parser import SECQueryParser
+from mods.utils import llm_call
+from schemas.schema import CheckScopeSchema, FeasibilityCheckSchema
+from templates.template import PromptTemplates
+
 
 class QueryValidator:
     """
-        An LLM-powered module to validate, sanitize, and enrich user queries about SEC filings.
-
-        This class now uses a Large Language Model (LLM) for core NLP tasks:
-        1.  Initialization: Fetches a list of all public companies from the SEC to
-            ground the LLM and perform final entity resolution.
-        2.  Scope Check (LLM-based): Asks an LLM to classify if the query is relevant.
-        3.  Entity Recognition (LLM-based): Instructs an LLM to extract companies,
-            metrics, and dates in a structured JSON format.
-        4.  Feasibility Check (LLM-based): Asks an LLM to determine if the query is
-            answerable solely from data in SEC filings.
+    QueryValidator is responsible for validating if the query is relevant to SEC filings,
+    And if it's relevant it extract useful entities like company names, tickers, time period and financial metrics from the user query
+    This info will be later used to formulate API calls to fetch data from SEC EDGAR database.
     """
-
     def __init__(self, stream: bool = False):
     
         self.stream = stream
@@ -28,7 +21,7 @@ class QueryValidator:
         
     def _check_scope(self, query: str) -> Dict[str, Any]:
         """
-        Stage 1 (LLM-based): Checks if the query is within the financial domain.
+        This utility function checks if the query is within the financial domain using LLM and responds with a specific JSON format.
         """
         prompt_template = \
 f"""
@@ -50,11 +43,12 @@ User Query: "{query}"
             return {"Error": e}
 
     def _recognize_and_resolve_entities(self, query: str) -> Dict[str, Any]:
+        """
+        This utility function extracts and resolves entities like company names, tickers, time periods, and financial metrics from the user query.
+        It uses regex-based parsing to do this.
+        """
 
         try:
-            # response = llm_call(messages=messages, response_format=FinancialEntitiesSchema.model_json_schema(), stream=self.stream)
-            # extracted_entities = FinancialEntitiesSchema.model_validate_json(response).model_dump()
-            # company_infos = extracted_entities.get("companies", [])
             parsed_data = self.parser.parse_query(query)
             return parsed_data.model_dump()
 
@@ -63,10 +57,12 @@ User Query: "{query}"
 
     def _check_feasibility(self, query: str, enriched_data: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Stage 3 (LLM-based): Checks if the query is realistically answerable
+        This utility function is used to check if the query is realistically answerable
         solely from information within public SEC filings (e.g., 10-K, 10-Q).
-        NOTE: We might have to use a much more intelligent LLM because here
-        The LLM has to think what the SEC API can be used for.
+        Even though the query is in the financial scope, but not every query can be answered solely based on SEC filings.
+        Hence this module is important to filter out such queries.
+
+        NOTE: Currently, this function is not being used anywhere.
         """
         prompt_template = PromptTemplates.SEC_FEASIBILITY_CHECK.substitute(query=query, enriched_data=json.dumps(enriched_data, indent=2))
         
@@ -87,43 +83,21 @@ User Query: "{query}"
     
     def validate_and_enrich(self, query: str, history: Optional[List] = None) -> Dict[str, Any]:
         """
-        The main validation pipeline that processes a user query.
+        The main query validation function that invokes other validation utility functions.
         """
+        # STAGE 1: Check if the query is within the financial domain
         scope_status = self._check_scope(query)
+
 
         if not scope_status.get("is_related"):
              return {
                 "status": "rejected",
                 "message": "My purpose is to answer questions about public companies using SEC filings. Please ask a relevant question."
             }
-        
+
+        # STAGE 2: Extract and resolve entities from the query
         enriched_data = self._recognize_and_resolve_entities(query)
-        # if "Error" in enriched_data.keys():
-        #     return {
-        #         "status": "entity_detection_failed",
-        #         "message": "I can't find any useful entities like the public company, ticker name etc in your query. Can you please paraphrase the question to include all these details?"
-        #     }
-
-        # # If we have metrics but no company, ask for clarification first.
-        # if len(enriched_data.get("financial_metrics")) > 0 and len(enriched_data.get("companies")) == 0:
-        #     return {
-        #         "status": "clarification_needed",
-        #         "message": "It looks like you're asking about a financial metric, but I don't know which company to analyze. Could you please specify a company or ticker?",
-        #         "enriched_query": enriched_data
-        #     }
-        
-        # rejection_message = self._check_feasibility(query, enriched_data)
-        # if not rejection_message.get("is_feasible"):
-        #     return {"status": "rejected", "message": rejection_message.get("reason"), "enriched_query": enriched_data}
-        
-
-        # if len(enriched_data.get("companies")) > 0 and len(enriched_data.get("financial_metrics")) == 0:
-        #      return {
-        #         "status": "clarification_needed",
-        #         "message": f"Could you specify which financial metric you're interested in?",
-        #         "enriched_query": enriched_data
-        #     }
-
+     
         return {"status": "valid", "enriched_query": enriched_data}
 
 if __name__ == "__main__":

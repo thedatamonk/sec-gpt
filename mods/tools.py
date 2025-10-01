@@ -1,9 +1,9 @@
-from edgar import Company
-from abc import ABC, abstractmethod
 import logging
-from typing import Any, Dict, Optional, List
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from typing import Any, Dict, List, Optional
 
+from edgar import Company
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
