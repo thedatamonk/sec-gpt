@@ -167,15 +167,11 @@ class FinancialDataTool(BaseTool):
 
     def _extract_quarter_from_filing(self, filing) -> Optional[int]:
         """Extract quarter number from filing"""
-        try:
-            # Get the filing period from the filing
-            if hasattr(filing, 'period_of_report'):
-                period = filing.period_of_report
-                month = period.month
-                return (month - 1) // 3 + 1
-        except:
-            pass
-        return None
+        # Get the filing period from the filing
+        if hasattr(filing, 'period_of_report'):
+            period = filing.period_of_report
+            month = period.month
+            return (month - 1) // 3 + 1
     
     def _extract_financial_metrics(self, filing, metric: str) -> Dict[str, Any]:
         """Extract specific financial metrics from filing"""
@@ -231,11 +227,8 @@ class FinancialDataTool(BaseTool):
     def _get_available_metrics(self, financials) -> List[str]:
         """Get list of available financial metrics"""
         metrics = []
-        try:
-            if hasattr(financials, 'income_statement'):
-                metrics.extend(dir(financials.income_statement))
-            if hasattr(financials, 'balance_sheet'):
-                metrics.extend(dir(financials.balance_sheet))
-        except:
-            pass
+        if hasattr(financials, 'income_statement'):
+            metrics.extend(dir(financials.income_statement))
+        if hasattr(financials, 'balance_sheet'):
+            metrics.extend(dir(financials.balance_sheet))
         return [m for m in metrics if not m.startswith('_')]
