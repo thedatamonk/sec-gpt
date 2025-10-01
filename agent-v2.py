@@ -1,0 +1,446 @@
+import logging
+from typing import Any, Dict, List, Optional
+
+from mods.llm import BaseLLM, OpenAILLM
+from mods.query_validator import QueryValidator
+from mods.tools import CompanyLookupTool, FilingSearchTool, FinancialDataTool
+from templates.template import PromptTemplates
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+class SecAgent:
+    """
+    An agent designed to answer queries about SEC filings by following a
+    Reason-Act (ReAct) framework.
+    """
+
+    def __init__(self, llm: Optional[BaseLLM] = None):
+        self.query_validator = QueryValidator()
+        self.tools = {
+            "company_lookup": CompanyLookupTool(),
+            "financial_data": FinancialDataTool(),
+            "filing_search": FilingSearchTool()
+        }
+
+        # Use provided LLM or default to OpenAI
+        self.llm = llm or OpenAILLM(model="gpt-3.5-turbo")
+
+        # Define tools in OpenAI function format
+        self.tool_definitions = self._create_tool_definitions()
+    
+    
+    def run(self, query: str) -> str:
+        """Process user query and return response"""
+
+        # Stage 1 - Validate query scope and extract entities
+        validation_result: Dict[str, Any] = self.query_validator.validate_and_enrich(query)
+
+        # Check if validation_result has an attribute "enriched_query"
+        if "enriched_query" in validation_result.keys():
+            extracted_entities = validation_result["enriched_query"]
+        else:
+            return validation_result.get("message", "Invalid query.")
+        
+        try:
+            logger.info(f"Processing query: {query}")
+            logger.info(f"Extracted entities: {extracted_entities}")
+
+            # Phase 1: Create execution plan
+            plan = self._create_plan(query, extracted_entities)
+            if not plan:
+                return "I couldn't create a plan to answer your query. Please try rephrasing."
+        
+            logger.info(f"Generated plan with {len(plan)} steps")
+
+            # Phase 2: Execute plan step by step (Fail Fast)
+            step_results = self._execute_plan(plan)
+
+            # Phase 3: Synthesize final answer
+            final_answer = self._synthesize_answer(query, plan, step_results)
+            
+            return final_answer
+
+        except Exception as e:
+            logger.error(f"Query processing error: {e}")
+            return f"Sorry, I encountered an error processing your query: {str(e)}"
+        
+    def _create_plan(self, user_query: str, extracted_entities: Dict[str, Any]) -> Optional[List[Dict]]:
+        """
+        Create execution plan using LLM
+        Returns: List of step dictionaries or None if planning failed
+        """
+
+        context = self._build_context(user_query, extracted_entities)
+
+        # get tool definitions
+        tools_info = self._format_tools_for_prompt()
+
+
+        planning_prompt = PromptTemplates.PLANNING_TEMPLATE.substitute(context=context, tools_info=tools_info)
+
+        try:
+            messages = [{"role": "user", "content": planning_prompt}]
+            response = self.llm.call(messages=messages)
+
+            if not response["content"]:
+                logger.error("LLM returned empty planning response")
+                return None
+            
+            # Parse JSON plan
+            import json
+            plan_json = json.loads(response["content"])
+            
+            if "plan" not in plan_json or not isinstance(plan_json["plan"], list):
+                logger.error("Invalid plan structure")
+                return None
+            
+            logger.info(f"Plan created successfully: {json.dumps(plan_json, indent=2)}")
+            return plan_json["plan"]
+        
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse plan JSON: {e}")
+            logger.error(f"LLM response was: {response['content']}")
+            return None
+        except Exception as e:
+            logger.error(f"Planning failed: {e}")
+            return None
+
+    def _format_tools_for_prompt(self) -> str:
+        """Format tool definitions into human-readable text for planning prompt"""
+        tools_text = "Available Tools:\n\n"
+        
+        for tool_def in self.tool_definitions:
+            func = tool_def["function"]
+            name = func["name"]
+            description = func["description"]
+            params = func["parameters"]["properties"]
+            required = func["parameters"].get("required", [])
+            
+            tools_text += f"Tool: {name}\n"
+            tools_text += f"Description: {description}\n"
+            tools_text += "Parameters:\n"
+            
+            for param_name, param_info in params.items():
+                param_type = param_info["type"]
+                param_desc = param_info.get("description", "")
+                is_required = "REQUIRED" if param_name in required else "optional"
+                
+                tools_text += f"  - {param_name} ({param_type}, {is_required}): {param_desc}\n"
+                
+                # Add enum values if present
+                if "enum" in param_info:
+                    tools_text += f"    Valid values: {', '.join(map(str, param_info['enum']))}\n"
+            
+            tools_text += "\n"
+        
+        return tools_text
+
+    def _execute_plan(self, plan: List[Dict]) -> List[Dict]:
+        """
+        Execute plan step by step with fail-fast behavior
+        Returns: List of step results
+        Raises: Exception if any critical step fails
+        """
+        step_results = []
+        
+        for step in plan:
+            step_num = step.get('step', '?')
+            action_type = step.get('action_type')
+            description = step.get('description', 'Unknown step')
+            
+            logger.info(f"Executing Step {step_num}: {description} (type: {action_type})")
+            
+            if action_type == 'reasoning':
+                # Reasoning steps are completed during planning
+                result = {
+                    'step': step_num,
+                    'description': description,
+                    'status': 'completed',
+                    'action_type': 'reasoning',
+                    'output': step.get('expected_output'),
+                    'reasoning': step.get('reasoning')
+                }
+                logger.info(f"Step {step_num} (reasoning): Completed")
+            
+            elif action_type == 'tool_call':
+                tool_name = step.get('tool')
+                tool_params = step.get('tool_parameters', {})
+                
+                if not tool_name or tool_name not in self.tools:
+                    error_msg = f"Step {step_num} failed: Invalid tool '{tool_name}'"
+                    logger.error(error_msg)
+                    raise Exception(error_msg)
+                
+                # Execute tool
+                tool = self.tools[tool_name]
+                tool_result = tool.execute(**tool_params)
+
+                if not tool_result.success:
+                    # FAIL FAST - Stop execution on tool failure
+                    error_msg = f"Step {step_num} failed: {tool_result.error}"
+                    logger.error(error_msg)
+                    raise Exception(error_msg)
+                
+                result = {
+                    'step': step_num,
+                    'description': description,
+                    'status': 'success',
+                    'action_type': 'tool_call',
+                    'tool': tool_name,
+                    'parameters': tool_params,
+                    'output': tool_result.data,
+                    'metadata': tool_result.metadata,
+                    'expected_output': step.get('expected_output')
+                }
+                logger.info(f"Step {step_num} (tool_call): Success - {tool_name}")
+
+            elif action_type == 'synthesis':
+                # Synthesis will be handled separately after all steps
+                result = {
+                    'step': step_num,
+                    'description': description,
+                    'status': 'pending',
+                    'action_type': 'synthesis',
+                    'expected_output': step.get('expected_output')
+                }
+                logger.info(f"Step {step_num} (synthesis): Pending")
+            
+            else:
+                error_msg = f"Step {step_num} failed: Unknown action_type '{action_type}'"
+                logger.error(error_msg)
+                raise Exception(error_msg)
+            
+            step_results.append(result)
+
+        logger.info(f"All {len(step_results)} steps executed successfully")
+        return step_results
+
+    def _synthesize_answer(self, user_query: str, plan: List[Dict], 
+                          step_results: List[Dict]) -> str:
+        """
+        Synthesize final answer from execution results
+        """
+        # Build context for synthesis
+        synthesis_context = \
+f"""Original Question: {user_query}
+
+Execution Plan and Results:
+"""
+        for result in step_results:
+            step_num = result['step']
+            desc = result['description']
+            action_type = result['action_type']
+            status = result['status']
+            
+            synthesis_context += f"\nStep {step_num}: {desc} [{action_type}]\n"
+            synthesis_context += f"Status: {status}\n"
+            
+            if action_type == 'reasoning':
+                synthesis_context += f"Output: {result.get('output')}\n"
+            elif action_type == 'tool_call':
+                synthesis_context += f"Tool Used: {result.get('tool')}\n"
+                synthesis_context += f"Result: {result.get('output')}\n"
+        
+        synthesis_context += "\nBased on the execution results above, provide a clear, natural language answer to the user's question. Be concise and accurate."
+        
+        try:
+            messages = [
+                {
+                    "role": "system",
+                    "content": "You are a helpful SEC financial data assistant. Synthesize the execution results into a clear, natural language answer."
+                },
+                {
+                    "role": "user",
+                    "content": synthesis_context
+                }
+            ]
+            
+            response = self.llm.call(messages=messages)
+            final_answer = response.get("content", "I processed your query but couldn't generate a response.")
+            
+            logger.info("Final answer synthesized successfully")
+            return final_answer
+
+        except Exception as e:
+            logger.error(f"Synthesis failed: {e}")
+            return f"I retrieved the data but encountered an error formatting the response: {str(e)}"
+    
+    def _build_context(self, user_query: str, extracted_entities: Dict) -> str:
+        """Build enriched context for LLM from query and extracted entities"""
+        context = f"User Query: {user_query}\n\n"
+        context += "Extracted Information:\n"
+
+        # Add company info
+        if extracted_entities.get("companies"):
+            companies = extracted_entities["companies"]
+            context += f"- Companies: {', '.join([c['value'] for c in companies])}\n"
+        
+        # Add financial metrics
+        if extracted_entities.get("financial_metrics"):
+            metrics = extracted_entities["financial_metrics"]
+            metric_names = [str(m).split('.')[-1] if hasattr(m, 'value') else str(m) 
+                          for m in metrics]
+            context += f"- Financial Metrics: {', '.join(metric_names)}\n"
+        
+        # Add time period
+        if extracted_entities.get("time_period"):
+            periods = extracted_entities["time_period"]
+            context += f"- Time Period: {', '.join(periods)}\n"
+
+        context += "\nPlease use the available tools to answer this query accurately."
+        return context
+
+    def _create_tool_definitions(self) -> List[Dict]:
+        """Create OpenAI function definitions for our tools"""
+        return [
+            {
+                "type": "function",
+                "function": {
+                    "name": "company_lookup",
+                    "description": "Look up company information by ticker or CIK",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "cik_or_ticker": {
+                                "type": "string",
+                                "description": "Company ticker (e.g., AAPL) or CIK number"
+                            }
+                        },
+                        "required": ["cik_or_ticker"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "financial_data",
+                    "description": "Get financial metrics (revenue, earnings, cash flow) for a specific period",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "cik_or_ticker": {
+                                "type": "string",
+                                "description": "Company ticker (e.g., AAPL) or CIK number"
+                            },
+                            "year": {
+                                "type": "integer",
+                                "description": "Year for the financial data (e.g., 2020)"
+                            },
+                            "quarter": {
+                                "type": "integer",
+                                "description": "Quarter (1-4) for quarterly data, omit for annual data",
+                                "enum": [1, 2, 3, 4]
+                            },
+                            "metric": {
+                                "type": "string",
+                                "description": "Financial metric to retrieve",
+                                "enum": ["revenue", "net_income", "total_assets", "total_equity", "cash_flow_from_operating_activities"]
+                            }
+                        },
+                        "required": ["cik_or_ticker", "year", "metric"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "filing_search",
+                    "description": "Search for SEC filings by company and form type",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "cik_or_ticker": {
+                                "type": "string",
+                                "description": "Company ticker (e.g., AAPL) or CIK number"
+                            },
+                            "form_type": {
+                                "type": "string",
+                                "description": "Type of SEC filing",
+                                "enum": ["10-K", "10-Q"]
+                            },
+                            "limit": {
+                                "type": "integer",
+                                "description": "Maximum number of filings to return (default 5)",
+                                "default": 5
+                            },
+                            "year": {
+                                "type": "integer",
+                                "description": "Filter by specific year"
+                            }
+                        },
+                        "required": ["cik_or_ticker"]
+                    }
+                }
+            }
+        ]
+
+    def _execute_tool_calls(self, tool_calls: List[Dict]) -> List[str]:
+        results = []
+        
+        for tool_call in tool_calls:
+            tool_name = tool_call["name"]
+            arguments = tool_call["arguments"]
+            logger.info(f"Executing tool: {tool_name} with args: {arguments}")
+
+            if tool_name not in self.tools:
+                # TODO: If tool not foundt, then we proceed with other tools
+                # But is this the correct behavior?
+                results.append(f"Error: Tool '{tool_name}' not found")
+                continue
+
+            try:
+                tool = self.tools[tool_name]
+                result = tool.execute(**arguments)
+                
+                # Format result for LLM
+                if result.success:
+                    result_str = f"Success: {result.data}"
+                    if result.metadata:
+                        result_str += f"\nMetadata: {result.metadata}"
+                else:
+                    result_str = f"Error: {result.error}"
+                
+                results.append(result_str)
+                
+            except Exception as e:
+                logger.error(f"Tool execution error: {e}")
+                results.append(f"Error executing {tool_name}: {str(e)}")
+        
+        return results
+
+
+if __name__ == "__main__":
+
+    # ANSI escape codes for colors
+    USER_COLOR = "\033[94m"      # Blue
+    AGENT_COLOR = "\033[92m"     # Green
+    RESET_COLOR = "\033[0m"
+
+    # Instantiate the agent once
+    sec_agent = SecAgent()
+
+    queries_to_test = ["What's AAPL's profit for last year?"]
+
+    response = sec_agent.run(queries_to_test[0])
+
+    print (response)
+    
+
+    # print(f"{AGENT_COLOR}{'='*50}{RESET_COLOR}")
+    # print (f"{AGENT_COLOR}Start chatting with SEC-Agent!!\nType \\quit to end the conversation.{RESET_COLOR}")
+    # print(f"{AGENT_COLOR}{'='*50}{RESET_COLOR}")
+    
+    # while True:
+    #     user_query = input(f"{USER_COLOR}You: {RESET_COLOR}")
+
+    #     if user_query.strip().lower() == "\\quit":
+    #         print(f"{AGENT_COLOR}SEC-Agent:{RESET_COLOR} Bye!")
+    #         break
+        
+    #     # Run the agent with the current query and the full history
+    #     # Here user starts a new chat session
+    #     agent_response = sec_agent.run(user_query)
+        
+    #     print (f"{AGENT_COLOR}SEC-Agent:{RESET_COLOR} {agent_response}'")
