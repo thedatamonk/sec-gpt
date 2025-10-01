@@ -3,11 +3,16 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
-from edgar import Company
+from edgar import Company, set_identity
+
+from constants import SEC_API_USER_AGENT
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+set_identity(SEC_API_USER_AGENT)
+
 
 @dataclass
 class ToolResult:
@@ -294,5 +299,7 @@ class FilingSearchTool(BaseTool):
                 }
             )
         
+        except Exception as e:
+            return self._handle_error(e, f"Failed to search filings for {cik_or_ticker}")
         except Exception as e:
             return self._handle_error(e, f"Failed to search filings for {cik_or_ticker}")
