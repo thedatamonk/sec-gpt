@@ -3,7 +3,7 @@ from typing import Any, Dict, List, Optional
 
 from mods.llm import BaseLLM, OpenAILLM
 from mods.query_validator import QueryValidator
-from mods.tools import CompanyLookupTool, FilingSearchTool, FinancialDataTool
+from sec_edgar_mcp.tools import CompanyTools
 from templates.template import PromptTemplates
 
 # Configure logging
@@ -18,10 +18,16 @@ class SecAgent:
 
     def __init__(self, llm: Optional[BaseLLM] = None):
         self.query_validator = QueryValidator()
-        self.tools = {
-            "company_lookup": CompanyLookupTool(),
-            "financial_data": FinancialDataTool(),
-            "filing_search": FilingSearchTool()
+        
+        # Initialize tool instances
+        self.company_tools = CompanyTools()
+        
+        # Map tool names to (instance, method_name)
+        self.tool_registry = {
+            "get_cik_by_ticker": (self.company_tools, "get_cik_by_ticker"),
+            "get_company_info": (self.company_tools, "get_company_info"),
+            "search_companies": (self.company_tools, "search_companies"),
+            "get_company_facts": (self.company_tools, "get_company_facts"),
         }
 
         # Use provided LLM or default to OpenAI
@@ -168,18 +174,31 @@ class SecAgent:
                 tool_name = step.get('tool')
                 tool_params = step.get('tool_parameters', {})
                 
-                if not tool_name or tool_name not in self.tools:
+                if not tool_name or tool_name not in self.tool_registry:
                     error_msg = f"Step {step_num} failed: Invalid tool '{tool_name}'"
                     logger.error(error_msg)
                     raise Exception(error_msg)
                 
-                # Execute tool
-                tool = self.tools[tool_name]
-                tool_result = tool.execute(**tool_params)
+                # Get tool instance and method name
+                tool_instance, method_name = self.tool_registry[tool_name]
+                
+                # Call the tool method directly
+                try:
+                    tool_method = getattr(tool_instance, method_name)
+                    tool_result = tool_method(**tool_params)
+                except AttributeError:
+                    error_msg = f"Step {step_num} failed: Method '{method_name}' not found on tool"
+                    logger.error(error_msg)
+                    raise Exception(error_msg)
+                except TypeError as e:
+                    error_msg = f"Step {step_num} failed: Invalid parameters for {tool_name}: {str(e)}"
+                    logger.error(error_msg)
+                    raise Exception(error_msg)
 
-                if not tool_result.success:
+                # Check if tool execution was successful
+                if not tool_result.get("success", False):
                     # FAIL FAST - Stop execution on tool failure
-                    error_msg = f"Step {step_num} failed: {tool_result.error}"
+                    error_msg = f"Step {step_num} failed: {tool_result.get('error', 'Unknown error')}"
                     logger.error(error_msg)
                     raise Exception(error_msg)
                 
@@ -190,8 +209,8 @@ class SecAgent:
                     'action_type': 'tool_call',
                     'tool': tool_name,
                     'parameters': tool_params,
-                    'output': tool_result.data,
-                    'metadata': tool_result.metadata,
+                    'output': tool_result,
+                    # 'metadata': tool_result.metadata,
                     'expected_output': step.get('expected_output')
                 }
                 logger.info(f"Step {step_num} (tool_call): Success - {tool_name}")
@@ -293,122 +312,116 @@ Execution Plan and Results:
         return context
 
     def _create_tool_definitions(self) -> List[Dict]:
-        """Create OpenAI function definitions for our tools"""
+        """Create OpenAI function definitions for CompanyTools methods"""
         return [
             {
                 "type": "function",
                 "function": {
-                    "name": "company_lookup",
-                    "description": "Look up company information by ticker or CIK",
+                    "name": "get_cik_by_ticker",
+                    "description": "Get the CIK (Central Index Key) for a company based on its ticker symbol",
                     "parameters": {
                         "type": "object",
                         "properties": {
-                            "cik_or_ticker": {
+                            "ticker": {
                                 "type": "string",
-                                "description": "Company ticker (e.g., AAPL) or CIK number"
+                                "description": "Company ticker symbol (e.g., AAPL, TSLA, MSFT)"
                             }
                         },
-                        "required": ["cik_or_ticker"]
+                        "required": ["ticker"]
                     }
                 }
             },
             {
                 "type": "function",
                 "function": {
-                    "name": "financial_data",
-                    "description": "Get financial metrics (revenue, earnings, cash flow) for a specific period",
+                    "name": "get_company_info",
+                    "description": "Get detailed company information including CIK, name, ticker, SIC, industry classification, and fiscal year end",
                     "parameters": {
                         "type": "object",
                         "properties": {
-                            "cik_or_ticker": {
+                            "identifier": {
                                 "type": "string",
                                 "description": "Company ticker (e.g., AAPL) or CIK number"
-                            },
-                            "year": {
-                                "type": "integer",
-                                "description": "Year for the financial data (e.g., 2020)"
-                            },
-                            "quarter": {
-                                "type": "integer",
-                                "description": "Quarter (1-4) for quarterly data, omit for annual data",
-                                "enum": [1, 2, 3, 4]
-                            },
-                            "metric": {
-                                "type": "string",
-                                "description": "Financial metric to retrieve",
-                                "enum": ["revenue", "net_income", "total_assets", "total_equity", "cash_flow_from_operating_activities"]
                             }
                         },
-                        "required": ["cik_or_ticker", "year", "metric"]
+                        "required": ["identifier"]
                     }
                 }
             },
             {
                 "type": "function",
                 "function": {
-                    "name": "filing_search",
-                    "description": "Search for SEC filings by company and form type",
+                    "name": "search_companies",
+                    "description": "Search for companies by name and get a list of matching companies",
                     "parameters": {
                         "type": "object",
                         "properties": {
-                            "cik_or_ticker": {
+                            "query": {
                                 "type": "string",
-                                "description": "Company ticker (e.g., AAPL) or CIK number"
-                            },
-                            "form_type": {
-                                "type": "string",
-                                "description": "Type of SEC filing",
-                                "enum": ["10-K", "10-Q"]
+                                "description": "Company name or partial name to search for"
                             },
                             "limit": {
                                 "type": "integer",
-                                "description": "Maximum number of filings to return (default 5)",
-                                "default": 5
-                            },
-                            "year": {
-                                "type": "integer",
-                                "description": "Filter by specific year"
+                                "description": "Maximum number of results to return (default 10)",
+                                "default": 10
                             }
                         },
-                        "required": ["cik_or_ticker"]
+                        "required": ["query"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_company_facts",
+                    "description": "Get comprehensive company facts and financial data including assets, liabilities, revenues, net income, EPS, and other key metrics",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "identifier": {
+                                "type": "string",
+                                "description": "Company ticker (e.g., AAPL) or CIK number"
+                            }
+                        },
+                        "required": ["identifier"]
                     }
                 }
             }
         ]
 
-    def _execute_tool_calls(self, tool_calls: List[Dict]) -> List[str]:
-        results = []
+    # def _execute_tool_calls(self, tool_calls: List[Dict]) -> List[str]:
+    #     results = []
         
-        for tool_call in tool_calls:
-            tool_name = tool_call["name"]
-            arguments = tool_call["arguments"]
-            logger.info(f"Executing tool: {tool_name} with args: {arguments}")
+    #     for tool_call in tool_calls:
+    #         tool_name = tool_call["name"]
+    #         arguments = tool_call["arguments"]
+    #         logger.info(f"Executing tool: {tool_name} with args: {arguments}")
 
-            if tool_name not in self.tools:
-                # TODO: If tool not foundt, then we proceed with other tools
-                # But is this the correct behavior?
-                results.append(f"Error: Tool '{tool_name}' not found")
-                continue
+    #         if tool_name not in self.tools:
+    #             # TODO: If tool not foundt, then we proceed with other tools
+    #             # But is this the correct behavior?
+    #             results.append(f"Error: Tool '{tool_name}' not found")
+    #             continue
 
-            try:
-                tool = self.tools[tool_name]
-                result = tool.execute(**arguments)
+    #         try:
+    #             tool = self.tools[tool_name]
+    #             result = tool.execute(**arguments)
                 
-                # Format result for LLM
-                if result.success:
-                    result_str = f"Success: {result.data}"
-                    if result.metadata:
-                        result_str += f"\nMetadata: {result.metadata}"
-                else:
-                    result_str = f"Error: {result.error}"
+    #             # Format result for LLM
+    #             if result.success:
+    #                 result_str = f"Success: {result.data}"
+    #                 if result.metadata:
+    #                     result_str += f"\nMetadata: {result.metadata}"
+    #             else:
+    #                 result_str = f"Error: {result.error}"
                 
-                results.append(result_str)
+    #             results.append(result_str)
                 
-            except Exception as e:
-                logger.error(f"Tool execution error: {e}")
-                results.append(f"Error executing {tool_name}: {str(e)}")
+    #         except Exception as e:
+    #             logger.error(f"Tool execution error: {e}")
+    #             results.append(f"Error executing {tool_name}: {str(e)}")
         
-        return results
+    #     return results
 
 
 if __name__ == "__main__":
@@ -421,7 +434,7 @@ if __name__ == "__main__":
     # Instantiate the agent once
     sec_agent = SecAgent()
 
-    queries_to_test = ["What's AAPL's profit for last year?"]
+    queries_to_test = ["Show me AAPL info."]
 
     response = sec_agent.run(queries_to_test[0])
 
