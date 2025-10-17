@@ -54,7 +54,7 @@ class OpenAILLM(BaseLLM):
             kwargs = {
                 "model": self.model,
                 "messages": messages,
-                "temperature": 0.1
+                "temperature": 1.0
             }
             
             if tools:
