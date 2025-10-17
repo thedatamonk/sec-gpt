@@ -3,7 +3,10 @@ from typing import Any, Dict, List, Optional
 
 from mods.llm import BaseLLM, OpenAILLM
 from mods.query_validator import QueryValidator
-from sec_edgar_mcp.tools import CompanyTools
+from sec_edgar_mcp.tools.company import CompanyTools
+from sec_edgar_mcp.tools.financial import FinancialTools
+from sec_edgar_mcp.tools.filings import FilingsTools
+
 from templates.template import PromptTemplates
 
 # Configure logging
@@ -21,22 +24,66 @@ class SecAgent:
         
         # Initialize tool instances
         self.company_tools = CompanyTools()
+        self.financial_tools = FinancialTools()
+        self.filing_tools = FilingsTools()
         
         # Map tool names to (instance, method_name)
-        self.tool_registry = {
-            "get_cik_by_ticker": (self.company_tools, "get_cik_by_ticker"),
-            "get_company_info": (self.company_tools, "get_company_info"),
-            "search_companies": (self.company_tools, "search_companies"),
-            "get_company_facts": (self.company_tools, "get_company_facts"),
-        }
+        # self.tool_registry = {
+        #     "get_cik_by_ticker": (self.company_tools, "get_cik_by_ticker"),
+        #     "get_company_info": (self.company_tools, "get_company_info"),
+        #     "search_companies": (self.company_tools, "search_companies"),
+        #     "get_company_facts": (self.company_tools, "get_company_facts"),
+        # }
+
+        # Auto-register all decorated methods from tool classes
+        self.tool_registry = {}
+        self._register_tool_class(CompanyTools, self.company_tools)
+        self._register_tool_class(FinancialTools, self.financial_tools)
+        self._register_tool_class(FilingsTools, self.filing_tools)
+
 
         # Use provided LLM or default to OpenAI
-        self.llm = llm or OpenAILLM(model="gpt-3.5-turbo")
+        self.llm = llm or OpenAILLM(model="gpt-5")
 
         # Define tools in OpenAI function format
         self.tool_definitions = self._create_tool_definitions()
+
+        logger.info(f"Initialized SecAgent with {len(self.tool_registry)} tools")   
     
     
+    def _register_tool_class(self, tool_class, instance):
+        """
+        Register all decorated methods from a tool class.
+        
+        Args:
+            tool_class: The tool class (e.g., CompanyTools)
+            instance: Instance of the tool class
+        """
+        for method_name in tool_class.get_method_names():
+            self.tool_registry[method_name] = (instance, method_name)
+            logger.info(f"Registered tool: {method_name}")
+
+    
+    def _create_tool_definitions(self) -> List[Dict]:
+        """
+        Collect tool definitions from all registered tool classes.
+        
+        Returns:
+            List of OpenAI function definitions
+        """
+        all_definitions = []
+        
+        # Collect from CompanyTools
+        all_definitions.extend(CompanyTools.get_tool_definitions())
+        all_definitions.extend(FinancialTools.get_tool_definitions())
+        all_definitions.extend(FilingsTools.get_tool_definitions())
+        
+        # Future: Add more tool classes here
+        # all_definitions.extend(FinancialTools.get_tool_definitions())
+        # all_definitions.extend(FilingTools.get_tool_definitions())
+        
+        return all_definitions
+
     def run(self, query: str) -> str:
         """Process user query and return response"""
 
@@ -311,118 +358,6 @@ Execution Plan and Results:
         context += "\nPlease use the available tools to answer this query accurately."
         return context
 
-    def _create_tool_definitions(self) -> List[Dict]:
-        """Create OpenAI function definitions for CompanyTools methods"""
-        return [
-            {
-                "type": "function",
-                "function": {
-                    "name": "get_cik_by_ticker",
-                    "description": "Get the CIK (Central Index Key) for a company based on its ticker symbol",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "ticker": {
-                                "type": "string",
-                                "description": "Company ticker symbol (e.g., AAPL, TSLA, MSFT)"
-                            }
-                        },
-                        "required": ["ticker"]
-                    }
-                }
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "get_company_info",
-                    "description": "Get detailed company information including CIK, name, ticker, SIC, industry classification, and fiscal year end",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "identifier": {
-                                "type": "string",
-                                "description": "Company ticker (e.g., AAPL) or CIK number"
-                            }
-                        },
-                        "required": ["identifier"]
-                    }
-                }
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "search_companies",
-                    "description": "Search for companies by name and get a list of matching companies",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "query": {
-                                "type": "string",
-                                "description": "Company name or partial name to search for"
-                            },
-                            "limit": {
-                                "type": "integer",
-                                "description": "Maximum number of results to return (default 10)",
-                                "default": 10
-                            }
-                        },
-                        "required": ["query"]
-                    }
-                }
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "get_company_facts",
-                    "description": "Get comprehensive company facts and financial data including assets, liabilities, revenues, net income, EPS, and other key metrics",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "identifier": {
-                                "type": "string",
-                                "description": "Company ticker (e.g., AAPL) or CIK number"
-                            }
-                        },
-                        "required": ["identifier"]
-                    }
-                }
-            }
-        ]
-
-    # def _execute_tool_calls(self, tool_calls: List[Dict]) -> List[str]:
-    #     results = []
-        
-    #     for tool_call in tool_calls:
-    #         tool_name = tool_call["name"]
-    #         arguments = tool_call["arguments"]
-    #         logger.info(f"Executing tool: {tool_name} with args: {arguments}")
-
-    #         if tool_name not in self.tools:
-    #             # TODO: If tool not foundt, then we proceed with other tools
-    #             # But is this the correct behavior?
-    #             results.append(f"Error: Tool '{tool_name}' not found")
-    #             continue
-
-    #         try:
-    #             tool = self.tools[tool_name]
-    #             result = tool.execute(**arguments)
-                
-    #             # Format result for LLM
-    #             if result.success:
-    #                 result_str = f"Success: {result.data}"
-    #                 if result.metadata:
-    #                     result_str += f"\nMetadata: {result.metadata}"
-    #             else:
-    #                 result_str = f"Error: {result.error}"
-                
-    #             results.append(result_str)
-                
-    #         except Exception as e:
-    #             logger.error(f"Tool execution error: {e}")
-    #             results.append(f"Error executing {tool_name}: {str(e)}")
-        
-    #     return results
-
 
 if __name__ == "__main__":
 
@@ -434,7 +369,7 @@ if __name__ == "__main__":
     # Instantiate the agent once
     sec_agent = SecAgent()
 
-    queries_to_test = ["Show me AAPL info."]
+    queries_to_test = ["Show me AAPL 10-K document from Q1 2024.", "Show me Nvidia's info. Include ticker name and CIK."]
 
     response = sec_agent.run(queries_to_test[0])
 
