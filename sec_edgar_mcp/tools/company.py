@@ -1,6 +1,10 @@
+import inspect
+from typing import Dict, List
+
 from ..core.client import EdgarClient
 from ..core.models import CompanyInfo
 from ..utils.exceptions import CompanyNotFoundError
+from .tool_schema import tool_schema
 from .types import ToolResponse
 
 
@@ -10,6 +14,10 @@ class CompanyTools:
     def __init__(self):
         self.client = EdgarClient()
 
+    @tool_schema(
+            description="Get the CIK (Central Index Key) for a company based on its ticker symbol",
+            ticker_description="Company ticker symbol (e.g., AAPL, TSLA, MSFT)"
+    )
     def get_cik_by_ticker(self, ticker: str) -> ToolResponse:
         """Get the CIK for a company based on its ticker symbol."""
         try:
@@ -26,6 +34,10 @@ class CompanyTools:
         except Exception as e:
             return {"success": False, "error": str(e)}
 
+    @tool_schema(
+        description="Get detailed company information including CIK, name, ticker, SIC, industry classification, and fiscal year end",
+        identifier_description="Company ticker (e.g., AAPL) or CIK number"
+    )
     def get_company_info(self, identifier: str) -> ToolResponse:
         """Get detailed company information."""
         try:
@@ -48,6 +60,11 @@ class CompanyTools:
         except Exception as e:
             return {"success": False, "error": f"Failed to get company info: {str(e)}"}
 
+    @tool_schema(
+        description="Search for companies by name and get a list of matching companies with their CIKs and tickers",
+        query_description="Company name or partial name to search for",
+        limit_description="Maximum number of results to return"
+    )
     def search_companies(self, query: str, limit: int = 10) -> ToolResponse:
         """Search for companies by name."""
         try:
@@ -61,6 +78,10 @@ class CompanyTools:
         except Exception as e:
             return {"success": False, "error": f"Failed to search companies: {str(e)}"}
 
+    @tool_schema(
+        description="Get comprehensive company facts and financial data including assets, liabilities, revenues, net income, EPS, cash, and other key GAAP metrics",
+        identifier_description="Company ticker (e.g., AAPL) or CIK number"
+    )
     def get_company_facts(self, identifier: str) -> ToolResponse:
         """Get company facts and financial data."""
         try:
@@ -127,9 +148,49 @@ class CompanyTools:
             return {"success": False, "error": f"Failed to get company facts: {str(e)}"}
 
 
+    @classmethod
+    def get_tool_definitions(cls) -> List[Dict]:
+        """
+        Extract all decorated methods and return their OpenAI function schemas.
+        
+        Returns:
+            List of tool definitions in OpenAI function calling format
+        """
+        definitions = []
+        
+        # Iterate through class methods
+        for name, method in inspect.getmembers(cls, predicate=inspect.isfunction):
+            # Check if method has our schema decorator
+            if hasattr(method, '__tool_schema__'):
+                schema = method.__tool_schema__
+                definitions.append({
+                    "type": "function",
+                    "function": schema
+                })
+        
+        return definitions
+    
+    @classmethod
+    def get_method_names(cls) -> List[str]:
+        """
+        Get list of all decorated method names.
+        
+        Returns:
+            List of method names that have tool_schema decorator
+        """
+        method_names = []
+        
+        for name, method in inspect.getmembers(cls, predicate=inspect.isfunction):
+            if hasattr(method, '__tool_schema__'):
+                method_names.append(name)
+        
+        return method_names
+    
+
 if __name__ == "__main__":
     tools = CompanyTools()
     print(tools.get_cik_by_ticker("AAPL"))
     print(tools.get_company_info("AAPL"))
     print(tools.search_companies("Apple", limit=5))
+    print(tools.get_company_facts("AAPL"))
     print(tools.get_company_facts("AAPL"))

@@ -1,7 +1,11 @@
-from typing import List, Optional
+import inspect
+from typing import Dict, List, Optional
+
 import requests
-from ..core.client import EdgarClient
+
 from ..config import initialize_config
+from ..core.client import EdgarClient
+from .tool_schema import tool_schema
 from .types import ToolResponse
 
 
@@ -11,6 +15,12 @@ class FinancialTools:
     def __init__(self):
         self.client = EdgarClient()
 
+    @tool_schema(
+        description="Get complete financial statements (Income Statement, Balance Sheet, Cash Flow) for a company by parsing XBRL data from SEC filings",
+        identifier_description="Company ticker (e.g., AAPL) or CIK number",
+        statement_type_description="Type of financial statement to retrieve",
+        statement_type_enum=["all", "income", "balance", "cash"]
+    )
     def get_financials(self, identifier: str, statement_type: str = "all") -> ToolResponse:
         """Get financial statements for a company by parsing XBRL data from filings."""
         try:
@@ -312,6 +322,12 @@ class FinancialTools:
         else:
             return str(statement)
 
+    @tool_schema(
+        description="Get segment revenue breakdown by geographic region or business segment for a company",
+        identifier_description="Company ticker (e.g., AAPL) or CIK number",
+        segment_type_description="Type of segment breakdown to retrieve",
+        segment_type_enum=["geographic", "business"]
+    )
     def get_segment_data(self, identifier: str, segment_type: str = "geographic") -> ToolResponse:
         """Get segment revenue breakdown."""
         try:
@@ -352,6 +368,11 @@ class FinancialTools:
         except Exception as e:
             return {"success": False, "error": f"Failed to get segment data: {str(e)}"}
 
+    @tool_schema(
+        description="Get key financial metrics like revenues, net income, assets, liabilities, EPS, and cash for a company",
+        identifier_description="Company ticker (e.g., AAPL) or CIK number",
+        metrics_description="List of specific GAAP metric names to retrieve (e.g., ['Revenues', 'NetIncomeLoss'])"
+    )
     def get_key_metrics(self, identifier: str, metrics: Optional[List[str]] = None) -> ToolResponse:
         """Get key financial metrics."""
         try:
@@ -418,6 +439,13 @@ class FinancialTools:
         except Exception as e:
             return {"success": False, "error": f"Failed to get key metrics: {str(e)}"}
 
+    @tool_schema(
+        description="Compare a financial metric across multiple time periods to analyze trends and calculate growth rates (CAGR)",
+        identifier_description="Company ticker (e.g., AAPL) or CIK number",
+        metric_description="GAAP metric name to compare (e.g., 'Revenues', 'NetIncomeLoss')",
+        start_year_description="Starting year for comparison (e.g., 2020)",
+        end_year_description="Ending year for comparison (e.g., 2024)"
+    )
     def compare_periods(self, identifier: str, metric: str, start_year: int, end_year: int) -> ToolResponse:
         """Compare a financial metric across periods."""
         try:
@@ -486,6 +514,11 @@ class FinancialTools:
         except Exception as e:
             return {"success": False, "error": f"Failed to compare periods: {str(e)}"}
 
+    @tool_schema(
+        description="Discover all available financial metrics and GAAP concepts for a company with optional search filtering",
+        identifier_description="Company ticker (e.g., AAPL) or CIK number",
+        search_term_description="Optional search term to filter metric names (case-insensitive)"
+    )
     def discover_company_metrics(self, identifier: str, search_term: Optional[str] = None) -> ToolResponse:
         """Discover available metrics for a company."""
         try:
@@ -551,6 +584,14 @@ class FinancialTools:
         except Exception as e:
             return {"success": False, "error": f"Failed to discover company metrics: {str(e)}"}
 
+    @tool_schema(
+        description="Extract specific XBRL concepts from a SEC filing with exact values directly from filing data",
+        identifier_description="Company ticker (e.g., AAPL) or CIK number",
+        accession_number_description="Optional SEC filing accession number. If not provided, uses latest filing",
+        concepts_description="Optional list of specific XBRL concept names to extract (e.g., ['Revenues', 'Assets'])",
+        form_type_description="Type of SEC filing to use if accession_number not provided",
+        form_type_enum=["10-K", "10-Q"]
+    )
     def get_xbrl_concepts(
         self,
         identifier: str,
@@ -924,6 +965,14 @@ class FinancialTools:
 
         return extracted
 
+    @tool_schema(
+        description="Discover all available XBRL concepts and statements in a SEC filing including company-specific extensions",
+        identifier_description="Company ticker (e.g., AAPL) or CIK number",
+        accession_number_description="Optional SEC filing accession number. If not provided, uses latest filing",
+        form_type_description="Type of SEC filing to analyze",
+        form_type_enum=["10-K", "10-Q"],
+        namespace_filter_description="Optional namespace filter (e.g., 'us-gaap', company ticker)"
+    )
     def discover_xbrl_concepts(
         self,
         identifier: str,
@@ -1036,6 +1085,43 @@ class FinancialTools:
         except Exception as e:
             return {"success": False, "error": f"Failed to discover XBRL concepts: {str(e)}"}
 
+    @classmethod
+    def get_tool_definitions(cls) -> List[Dict]:
+        """
+        Extract all decorated methods and return their OpenAI function schemas.
+        
+        Returns:
+            List of tool definitions in OpenAI function calling format
+        """
+        definitions = []
+        
+        # Iterate through class methods
+        for name, method in inspect.getmembers(cls, predicate=inspect.isfunction):
+            # Check if method has our schema decorator
+            if hasattr(method, '__tool_schema__'):
+                schema = method.__tool_schema__
+                definitions.append({
+                    "type": "function",
+                    "function": schema
+                })
+        
+        return definitions
+    
+    @classmethod
+    def get_method_names(cls) -> List[str]:
+        """
+        Get list of all decorated method names.
+        
+        Returns:
+            List of method names that have tool_schema decorator
+        """
+        method_names = []
+        
+        for name, method in inspect.getmembers(cls, predicate=inspect.isfunction):
+            if hasattr(method, '__tool_schema__'):
+                method_names.append(name)
+        
+        return method_names
 
 if __name__ == "__main__":
     # Simple test

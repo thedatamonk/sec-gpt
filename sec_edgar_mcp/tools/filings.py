@@ -1,6 +1,10 @@
-from typing import Dict, Union, List, Optional, Any
+import inspect
 from datetime import datetime
+from typing import Any, Dict, List, Optional, Union
+
 from edgar import get_filings
+from .tool_schema import tool_schema
+
 from ..core.client import EdgarClient
 from ..core.models import FilingInfo
 from ..utils.exceptions import FilingNotFoundError
@@ -13,6 +17,13 @@ class FilingsTools:
     def __init__(self):
         self.client = EdgarClient()
 
+    @tool_schema(
+        description="Get recent SEC filings for a specific company or across all companies, filtered by form type and time period",
+        identifier_description="Company ticker (e.g., AAPL) or CIK number. Leave empty to get filings across all companies",
+        form_type_description="Type of SEC filing to retrieve (e.g., '10-K', '10-Q', '8-K') or list of form types",
+        days_description="Number of days to look back for recent filings",
+        limit_description="Maximum number of filings to return"
+    )
     def get_recent_filings(
         self,
         identifier: Optional[str] = None,
@@ -65,6 +76,11 @@ class FilingsTools:
         except Exception as e:
             return {"success": False, "error": f"Failed to get recent filings: {str(e)}"}
 
+    @tool_schema(
+        description="Get the full content and metadata of a specific SEC filing by accession number",
+        identifier_description="Company ticker (e.g., AAPL) or CIK number",
+        accession_number_description="SEC filing accession number (e.g., '0000320193-23-000077')"
+    )
     def get_filing_content(self, identifier: str, accession_number: str) -> ToolResponse:
         """Get the content of a specific filing."""
         try:
@@ -72,6 +88,7 @@ class FilingsTools:
 
             # Find the specific filing
             filing = None
+            # NOTE: get_filings() method is causing rate limiting issues
             for f in company.get_filings():
                 if f.accession_number.replace("-", "") == accession_number.replace("-", ""):
                     filing = f
@@ -114,6 +131,11 @@ class FilingsTools:
         except Exception as e:
             return {"success": False, "error": f"Failed to get filing content: {str(e)}"}
 
+    @tool_schema(
+        description="Analyze an 8-K filing to identify specific material events, items reported, and press releases",
+        identifier_description="Company ticker (e.g., AAPL) or CIK number",
+        accession_number_description="SEC filing accession number of the 8-K filing"
+    )
     def analyze_8k(self, identifier: str, accession_number: str) -> ToolResponse:
         """Analyze an 8-K filing for specific events."""
         try:
@@ -170,6 +192,13 @@ class FilingsTools:
         except Exception as e:
             return {"success": False, "error": f"Failed to analyze 8-K: {str(e)}"}
 
+    @tool_schema(
+        description="Extract specific sections from 10-K or 10-Q filings such as Business, Risk Factors, MD&A, and Financial Statements",
+        identifier_description="Company ticker (e.g., AAPL) or CIK number",
+        accession_number_description="SEC filing accession number",
+        form_type_description="Type of SEC filing (10-K or 10-Q)",
+        form_type_enum=["10-K", "10-Q"]
+    )
     def get_filing_sections(self, identifier: str, accession_number: str, form_type: str) -> ToolResponse:
         """Get specific sections from a filing."""
         try:
@@ -217,6 +246,44 @@ class FilingsTools:
         except Exception as e:
             return {"success": False, "error": f"Failed to get filing sections: {str(e)}"}
 
+    
+    @classmethod
+    def get_tool_definitions(cls) -> List[Dict]:
+        """
+        Extract all decorated methods and return their OpenAI function schemas.
+        
+        Returns:
+            List of tool definitions in OpenAI function calling format
+        """
+        definitions = []
+        
+        # Iterate through class methods
+        for name, method in inspect.getmembers(cls, predicate=inspect.isfunction):
+            # Check if method has our schema decorator
+            if hasattr(method, '__tool_schema__'):
+                schema = method.__tool_schema__
+                definitions.append({
+                    "type": "function",
+                    "function": schema
+                })
+        
+        return definitions
+    
+    @classmethod
+    def get_method_names(cls) -> List[str]:
+        """
+        Get list of all decorated method names.
+        
+        Returns:
+            List of method names that have tool_schema decorator
+        """
+        method_names = []
+        
+        for name, method in inspect.getmembers(cls, predicate=inspect.isfunction):
+            if hasattr(method, '__tool_schema__'):
+                method_names.append(name)
+        
+        return method_names
 
 if __name__ == "__main__":
     tools = FilingsTools()
