@@ -131,7 +131,7 @@ class SecAgent:
         
         return all_definitions
 
-    def run(self, query: str) -> str:
+    def run(self, query: str) -> Dict[str, Any]:
         """Process user query and return response"""
 
         # Stage 1 - Validate query scope and extract entities
@@ -150,7 +150,7 @@ class SecAgent:
             # Phase 1: Create execution plan
             plan = self._create_plan(query, extracted_entities)
             if not plan:
-                return "I couldn't create a plan to answer your query. Please try rephrasing."
+                return {"role": "SECAgent", "content": "I couldn't create a plan to answer your query. Please try rephrasing."}
         
             logger.info(f"Generated plan with {len(plan)} steps")
 
@@ -161,11 +161,11 @@ class SecAgent:
             # Phase 3: Synthesize final answer
             final_answer = self._synthesize_answer(query, plan, step_results)
             
-            return final_answer
+            return {"role": "SECAgent", "content": final_answer}
 
         except Exception as e:
             logger.error(f"Query processing error: {e}")
-            return f"Sorry, I encountered an error processing your query: {str(e)}"
+            return {"role": "SECAgent", "content": f"Sorry, I encountered an error processing your query: {str(e)}"}
         
     def _create_plan(self, user_query: str, extracted_entities: Dict[str, Any]) -> Optional[List[Dict]]:
         """
