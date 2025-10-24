@@ -4,3 +4,5 @@ edgartools
 openai
 openlit
 ollama
+fastapi
+uvicorn
