@@ -125,10 +125,6 @@ class SecAgent:
         all_definitions.extend(FinancialTools.get_tool_definitions())
         all_definitions.extend(FilingsTools.get_tool_definitions())
         
-        # Future: Add more tool classes here
-        # all_definitions.extend(FinancialTools.get_tool_definitions())
-        # all_definitions.extend(FilingTools.get_tool_definitions())
-        
         return all_definitions
 
     def run(self, query: str) -> Dict[str, Any]:
@@ -860,8 +856,6 @@ Return ONLY the JSON object, no other text."""
         
         return completed_steps
 
-        
-
     def _synthesize_answer_deprecated(self, user_query: str, plan: List[Dict], 
                           step_results: List[Dict]) -> str:
         """
@@ -984,8 +978,6 @@ Provide a clear, honest answer based on what was successfully retrieved."""
         except Exception as e:
             logger.error(f"Synthesis failed: {e}")
             return f"I retrieved the data but encountered an error formatting the response: {str(e)}"
-
-
 
     def _build_context(self, user_query: str, extracted_entities: Dict) -> str:
         """Build enriched context for LLM from query and extracted entities"""
