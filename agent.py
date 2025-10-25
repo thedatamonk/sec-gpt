@@ -137,7 +137,7 @@ class SecAgent:
         if "enriched_query" in validation_result.keys():
             extracted_entities = validation_result["enriched_query"]
         else:
-            return validation_result.get("message", "Invalid query.")
+            return {"role": "user", "content": validation_result.get("message", "Invalid query.")}
         
         try:
             logger.info(f"Processing query: {query}")
