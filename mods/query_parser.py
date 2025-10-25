@@ -7,9 +7,12 @@ from typing import List
 import requests
 from pydantic import BaseModel
 
-from constants import SEC_API_USER_AGENT, SEC_COMPANY_TICKERS_URL
+from mods.constants import SEC_COMPANY_TICKERS_URL
 from schemas.schema import Company, FinancialMetrics
+from dotenv import load_dotenv
+import os
 
+load_dotenv()
 
 class ParsedQuery(BaseModel):
     companies: List[Company]
@@ -129,7 +132,7 @@ class SECQueryParser:
         print("Fetching fresh data from SEC API...")
         try:
             response = requests.get(SEC_COMPANY_TICKERS_URL, 
-                                  headers={"User-Agent": SEC_API_USER_AGENT})
+                                  headers={"User-Agent": os.getenv("SEC_EDGAR_USER_AGENT")})
             response.raise_for_status()
             all_companies = response.json()
             
