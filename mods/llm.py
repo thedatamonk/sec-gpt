@@ -1,9 +1,12 @@
 import logging
 import os
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Literal
+from mods.constants import DEFAULT_OLLAMA_MODEL, DEFAULT_OLLAMA_BASE_URL, DEFAULT_OPENAI_CHAT_MODEL
+from pydantic.json_schema import JsonSchemaValue
 
 from dotenv import load_dotenv
+import ollama
 
 load_dotenv()
 
@@ -17,7 +20,7 @@ class BaseLLM(ABC):
         
     @abstractmethod
     def call(self, messages: List[Dict], tools: Optional[List[Dict]] = None, 
-            tool_choice: str = "auto") -> Dict[str, Any]:
+            tool_choice: str = "auto", *args, **kwargs) -> Dict[str, Any] | str:
         """
         Make LLM call with optional tool usage
         Args:
@@ -29,10 +32,9 @@ class BaseLLM(ABC):
         """
         pass
 
-
 class OpenAILLM(BaseLLM):
     """OpenAI LLM"""
-    def __init__(self, model: str = "gpt-3.5-turbo", api_key: Optional[str] = None):
+    def __init__(self, model: str = DEFAULT_OPENAI_CHAT_MODEL, api_key: Optional[str] = None):
         """
         Initialize OpenAI client
         Args:
@@ -46,6 +48,7 @@ class OpenAILLM(BaseLLM):
         
         self.model = model
         self.client = OpenAI(api_key=api_key or str(os.getenv("OPENAI_API_KEY")))
+        print (f"Initialized OpenAI client with model: {self.model}")
 
     
     def call(self, messages: List[Dict], tools: Optional[List[Dict]] = None, tool_choice: str = "auto") -> Dict[str, Any]:
@@ -100,16 +103,51 @@ class OpenAILLM(BaseLLM):
 
 class OllamaLLM(BaseLLM):
     """Ollama LLM"""
-    def __init__(self):
+    def __init__(self, model: str = DEFAULT_OLLAMA_MODEL):
         """
         Initialize Ollama client
         Args:
             model: Ollama model name
             api_url: Ollama API URL
         """
-        raise NotImplementedError("Ollama LLM integration is not implemented yet.")
+        self.model = model
+        self.base_url = os.getenv("OLLAMA_BASE_URL", DEFAULT_OLLAMA_BASE_URL)
+        self.client = ollama.Client(host=self.base_url)
+        print (f"Initialized Ollama client with model: {self.model} at {self.base_url}")
 
+
+    def call(self,
+             messages: List[Dict],
+             tools: Optional[List[Dict]] = None,
+             tool_choice: str = "auto",
+             stream: bool = False,
+             response_format: JsonSchemaValue | Literal['', 'json'] | None = None
+             ) -> str:
+        """
+        Calls the Ollama LLM with the provided messages and parameters.
+        """
+        try:
+            if stream:
+                full_response_content = []
+                for chunk in self.client.chat(
+                    model=self.model, messages=messages, stream=True, format=response_format
+                ):
+                    if chunk.get('done'):
+                        break
     
-    def call(self, messages: List[Dict], tools: Optional[List[Dict]] = None, tool_choice: str = "auto") -> Dict[str, Any]:
-        """Call Ollama API (no function calling support)"""
-        raise NotImplementedError("Ollama LLM integration is not implemented yet.")
+                    content = chunk["message"]["content"]
+                    print (content, end="", flush=True)
+                    full_response_content.append(content)
+                
+                return "".join(full_response_content)
+            else:
+                response = self.client.chat(model=self.model, messages=messages, format=response_format)
+                return response["message"]["content"]
+        
+        except ollama.ResponseError as e:
+            print (f"Error interacting with Ollama: {e}")
+            print (
+                f"Ensure Ollama server is running and the model "
+                f"'{self.model}' is dowloaded (`ollama pull {self.model}`)."
+            )
+            return f"Error: {e}"

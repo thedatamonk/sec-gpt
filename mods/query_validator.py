@@ -2,7 +2,7 @@ import json
 from typing import Any, Dict, List, Optional
 
 from mods.query_parser import SECQueryParser
-from mods.utils import llm_call
+from mods.llm import OllamaLLM
 from schemas.schema import CheckScopeSchema, FeasibilityCheckSchema
 from templates.template import PromptTemplates
 
@@ -17,8 +17,8 @@ class QueryValidator:
     
         self.stream = stream
         self.parser = SECQueryParser()
-
-        
+        self.llm = OllamaLLM()
+ 
     def _check_scope(self, query: str) -> Dict[str, Any]:
         """
         This utility function checks if the query is within the financial domain using LLM and responds with a specific JSON format.
@@ -36,7 +36,7 @@ User Query: "{query}"
         }]
         
         try:
-            response = llm_call(messages=messages, response_format=CheckScopeSchema.model_json_schema(), stream=self.stream)
+            response = self.llm.call(messages=messages, response_format=CheckScopeSchema.model_json_schema(), stream=self.stream)
             response_obj = CheckScopeSchema.model_validate_json(response).model_dump()
             return response_obj
         except (json.JSONDecodeError, TypeError) as e:
@@ -73,7 +73,7 @@ User Query: "{query}"
 
 
         try:
-            response = llm_call(messages=messages, response_format=FeasibilityCheckSchema.model_json_schema(), stream=self.stream)
+            response = self.llm.call(messages=messages, response_format=FeasibilityCheckSchema.model_json_schema(), stream=self.stream)
             response_obj = FeasibilityCheckSchema.model_validate_json(response).model_dump()
 
             return response_obj
