@@ -2,7 +2,7 @@ mcp
 anthropic
 edgartools
 openai
-openlit
 ollama
 fastapi
 uvicorn
+requests
